@@ -205,62 +205,36 @@ def verify_session():
     get_stripe()
     data = request.get_json(silent=True) or {}
     session_id = data.get("session_id")
-
     if not session_id:
         return jsonify({"paid": False, "error": "missing_session_id"}), 400
 
-    # 1) Stripe 세션 조회 (잘못된 session_id 방어)
+    # Stripe 세션 조회 (잘못된 ID 방어)
     try:
         session = stripe.checkout.Session.retrieve(session_id)
-    except InvalidRequestError:
-        # 존재하지 않거나 잘못된 session_id
-        return jsonify({"paid": False, "error": "invalid_session_id"}), 400
     except Exception as e:
-        # Stripe 일시 오류 등
-        return jsonify({"paid": False, "error": "stripe_error"}), 500
+        # dummy, 잘못된 세션ID, 만료/삭제 등 -> 400으로 처리
+        return jsonify({"paid": False, "error": "invalid_session_id"}), 400
 
-    # 2) 결제 상태 확인
     if getattr(session, "payment_status", None) != "paid":
-        return jsonify({"paid": False})
+        return jsonify({"paid": False}), 200
 
-    # 3) 메타데이터에서 input_id 가져오기
     input_id = (session.get("metadata") or {}).get("input_id")
     if not input_id:
-        return jsonify({"paid": True, "report_ready": False})
+        return jsonify({"paid": True, "report_ready": False}), 200
 
-    # 4) 이미 리포트가 있으면 그대로 반환
     if input_id in reports:
-        return jsonify({
-            "paid": True,
-            "report_ready": True,
-            "report": reports[input_id]["report"]
-        })
+        return jsonify({"paid": True, "report_ready": True, "report": reports[input_id]["report"]}), 200
 
-    # 5) 결제 완료 후 AI 리포트 생성
     payload = pending_inputs.get(input_id) or {}
     try:
         report = generate_ai_report(payload)
-    except Exception as e:
-        # AI 생성 실패해도 서버는 죽지 않게
-        return jsonify({
-            "paid": True,
-            "report_ready": False,
-            "error": "ai_generation_failed"
-        }), 200
+    except Exception:
+        return jsonify({"paid": True, "report_ready": False, "error": "ai_generation_failed"}), 200
 
-    reports[input_id] = {
-        "report": report,
-        "payload": payload,
-        "session_id": session_id
-    }
+    reports[input_id] = {"report": report, "payload": payload, "session_id": session_id}
     _save_json(REPORTS_PATH, reports)
 
-    return jsonify({
-        "paid": True,
-        "report_ready": True,
-        "report": report
-    })
-
+    return jsonify({"paid": True, "report_ready": True, "report": report}), 200
 # --- Stripe webhook (optional, production recommended) ---
 @app.post("/webhook/stripe")
 def stripe_webhook():

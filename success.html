@@ -335,7 +335,7 @@
   async function verifySessionWithPolling(session_id){
     const maxTries = 10; // 약 20초
     for(let i=0; i<maxTries; i++){
-      const res = await fetch("/api/verify-session", {
+      const res = await fetch("https://jethedr-growth-api-production.up.railway.app/api/verify-session", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body: JSON.stringify({session_id})

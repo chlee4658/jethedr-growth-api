@@ -10,6 +10,7 @@ from flask import Flask, request, jsonify, send_from_directory, abort
 from openai import OpenAI
 import stripe
 from dotenv import load_dotenv
+from flask_cors import CORS
 
 # ✅ .env를 항상 growth 최상단에서 읽도록 강제 (실행 위치에 따라 누락되는 문제 방지)
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -39,6 +40,7 @@ pending_inputs: Dict[str, Any] = _load_json(PENDING_PATH, {})
 reports: Dict[str, Any] = _load_json(REPORTS_PATH, {})
 
 app = Flask(__name__, static_folder=str(BASE_DIR), static_url_path="")
+CORS(app)
 
 
 # --- OpenAI ---

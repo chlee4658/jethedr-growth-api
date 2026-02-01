@@ -1,0 +1,446 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <title>성장 해석 리포트</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+
+  <!-- 기존 스타일 사용(버튼 스타일 등) -->
+  <link rel="stylesheet" href="style.css" />
+
+  <style>
+    :root{
+      --border:#e5e7eb;
+      --muted:#6b7280;
+      --bg:#f8fafc;
+      --card:#ffffff;
+      --soft:#f9fafb;
+      --bar:#374151;
+      --barbg:#eef2f7;
+    }
+    *{ box-sizing:border-box; }
+    body{
+      margin:0;
+      background:var(--bg);
+      font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+      color:#111827;
+    }
+
+    /* ✅ 화면 쏠림 방지: 충분히 넓게, 중앙 정렬 */
+    .wrap{
+      max-width: 1280px;
+      margin: 28px auto;
+      padding: 0 20px;
+    }
+
+    .card{
+      background:var(--card);
+      border:1px solid var(--border);
+      border-radius:18px;
+      padding:22px;
+      margin-bottom:18px;
+    }
+
+    h1{ margin:0 0 8px; font-size:26px; }
+
+    /* status는 JS가 쓰므로 존재는 하되 화면엔 숨김 */
+    .status{ margin-top:10px; color:var(--muted); font-size:14px; display:none; }
+
+    /* ✅ Progress UI */
+    .progressWrap{
+      margin-top: 10px;
+      display:none;
+    }
+    .progressTop{
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      margin-bottom:6px;
+      gap:12px;
+    }
+    .progressLabel{
+      color:var(--muted);
+      font-size:13px;
+    }
+    .progressPct{
+      color:#111827;
+      font-weight:800;
+      font-size:13px;
+      min-width:42px;
+      text-align:right;
+    }
+    .progressTrack{
+      width:100%;
+      height:10px;
+      background:var(--barbg);
+      border-radius:999px;
+      overflow:hidden;
+      border: 1px solid var(--border);
+    }
+    .progressBar{
+      height:100%;
+      width:0%;
+      background:var(--bar);
+      border-radius:999px;
+    }
+
+    /* ✅ 환자 정보: 라벨 옆 값, 2줄로 compact */
+    .patientBlock{ margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+    .patientLine{
+      display:flex;
+      flex-wrap:wrap;
+      gap: 18px;
+      font-size: 15px;
+      line-height: 1.6;
+      margin: 6px 0;
+    }
+    .patientLine b{ font-weight: 800; margin-right: 4px; }
+    .patientLine span{ white-space: nowrap; }
+
+    /* ✅ 그래프 2개 가로 */
+    .charts{
+      display:grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+      margin-top: 16px;
+      align-items: stretch;
+    }
+    .chartCard{
+      border:1px solid var(--border);
+      border-radius:16px;
+      padding:14px;
+      background:#fff;
+      min-height: 280px;
+    }
+    .chartTitle{
+      font-size:14px;
+      font-weight:800;
+      color:var(--muted);
+      margin:0 0 10px;
+    }
+    .chartCard img{
+      width:100%;
+      height:auto;
+      display:block;
+      border-radius:12px;
+      border: 1px solid var(--border);
+      background: #fff;
+    }
+
+    /* ✅ 리포트: 화면에서는 스크롤, 인쇄에서는 전체 출력 */
+    .reportBox{
+      margin-top: 16px;
+      border:1px solid var(--border);
+      border-radius:16px;
+      background: var(--soft);
+      padding:16px;
+      white-space: pre-wrap;
+      line-height: 1.7;
+      font-size: 14.5px;
+
+      max-height: 560px;
+      overflow: auto;
+    }
+
+    /* ✅ 버튼 */
+    .actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap: 12px;
+      justify-content:flex-end;
+      margin-top: 14px;
+    }
+    /* 밑줄 제거 */
+    .actions a, .actions a:visited, .actions a:hover, .actions a:active{
+      text-decoration:none !important;
+    }
+
+    /* ✅ 인쇄/PDF */
+    @page { size: Letter; margin: 14mm; }
+
+    @media print{
+      body{ background:#fff; }
+      .wrap{ max-width: 8.5in; margin: 0 auto; padding: 0; }
+      .card{ border:none; padding:0; }
+
+      /* 버튼/프로그레스 숨김 */
+      .actions{ display:none !important; }
+      .progressWrap{ display:none !important; }
+
+      /* 리포트 전체 출력(스크롤바 인쇄 금지) */
+      .reportBox{
+        max-height: none !important;
+        overflow: visible !important;
+      }
+
+      /* ✅ 인쇄에서도 그래프 무조건 2열 */
+      .charts{
+        grid-template-columns: 1fr 1fr !important;
+        gap: 12px !important;
+        page-break-inside: avoid;
+      }
+      .chartCard{ break-inside: avoid; page-break-inside: avoid; }
+
+      /* 인쇄 시 더 선명 */
+      .chartCard img{
+        filter: contrast(2.2) brightness(0.95) saturate(1.2);
+        image-rendering: -webkit-optimize-contrast;
+      }
+    }
+
+    @media (max-width: 980px){
+      .charts{ grid-template-columns: 1fr; }
+      .actions{ justify-content:flex-start; }
+    }
+
+    .note{
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+
+    <!-- 제목 카드 -->
+    <div class="card">
+      <h1>성장 해석 리포트</h1>
+
+      <!-- status는 화면에 안 보이게 유지(기능 유지용) -->
+      <div id="status" class="status"></div>
+
+      <!-- ✅ 진행률 UI -->
+      <div id="progressWrap" class="progressWrap">
+        <div class="progressTop">
+          <div class="progressLabel">AI 리포트 생성 중…</div>
+          <div id="progressPct" class="progressPct">0%</div>
+        </div>
+        <div class="progressTrack">
+          <div id="progressBar" class="progressBar"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 환자 정보 + 그래프 + 리포트 -->
+    <div class="card">
+
+      <!-- 환자 정보 -->
+      <div id="patientBlock" class="patientBlock" style="display:none;">
+        <div class="patientLine">
+          <span><b>이름:</b> <span id="pName">-</span></span>
+          <span><b>생년월일:</b> <span id="pDob">-</span></span>
+          <span><b>성별:</b> <span id="pSex">-</span></span>
+          <span><b>나이:</b> <span id="pAge">-</span></span>
+        </div>
+        <div class="patientLine">
+          <span><b>신장:</b> <span id="pHeight">-</span></span>
+          <span><b>체중:</b> <span id="pWeight">-</span></span>
+          <span><b>날짜:</b> <span id="pDate">-</span></span>
+        </div>
+      </div>
+
+      <!-- 그래프 -->
+      <div class="charts" id="charts" style="display:none;">
+        <div class="chartCard">
+          <div class="chartTitle">신장 그래프</div>
+          <img id="imgHeight" alt="신장 그래프" />
+        </div>
+        <div class="chartCard">
+          <div class="chartTitle">체중 그래프</div>
+          <img id="imgWeight" alt="체중 그래프" />
+        </div>
+      </div>
+
+      <!-- 리포트 -->
+      <div id="report" class="reportBox" style="display:none;"></div>
+
+      <!-- 버튼 -->
+      <div class="actions" id="actions" style="display:none;">
+        <button class="btn" id="btnPdf">PDF로 저장</button>
+        <button class="btn ghost" id="btnPrint">인쇄</button>
+        <a class="btn ghost" href="https://jethedr.com" target="_blank" rel="noopener">추가 상담 예약</a>
+        <a class="btn ghost" href="index.html">성장곡선 페이지로 돌아가기</a>
+      </div>
+
+      <!-- 안내(맨 아래) -->
+      <div class="note" id="note" style="display:none;">
+        본 리포트는 정보 제공 목적이며 진단·처방·치료를 대체하지 않습니다.
+        응급 증상(호흡곤란, 의식저하, 심한 탈수 등) 시에는 즉시 ER/911을 이용해 주세요.
+      </div>
+    </div>
+  </div>
+
+<script>
+  // ---- helpers ----
+  function sexLabel(code){
+    const c = String(code || "");
+    if (c === "1") return "남";
+    if (c === "2") return "여";
+    return code || "-";
+  }
+  function formatAgeToYearsMonths(totalMonths){
+    if (typeof totalMonths !== "number" || !Number.isFinite(totalMonths) || totalMonths < 0) return "-";
+    const y = Math.floor(totalMonths / 12);
+    const m = Math.floor(totalMonths % 12);
+    return `${y}세 ${m}개월`;
+  }
+  function pctInt(p){
+    if (typeof p !== "number" || !Number.isFinite(p)) return "-";
+    return `${Math.round(p)}%`;
+  }
+  function loadLatest(){
+    try{
+      const raw = localStorage.getItem("growth_latest");
+      if(!raw) return null;
+      return JSON.parse(raw);
+    }catch(e){ return null; }
+  }
+  function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
+
+  // ---- Progress (fake progress) ----
+  function startFakeProgress(){
+    const wrap = document.getElementById("progressWrap");
+    const bar  = document.getElementById("progressBar");
+    const pct  = document.getElementById("progressPct");
+    if(!wrap || !bar || !pct) return { stop: ()=>{} };
+
+    wrap.style.display = "block";
+
+    let value = 0;
+    let running = true;
+
+    const timer = setInterval(() => {
+      if(!running) return;
+      const inc = value < 30 ? 4 : value < 60 ? 2 : 1;
+      value = Math.min(90, value + inc);
+      bar.style.width = value + "%";
+      pct.textContent = value + "%";
+    }, 700);
+
+    const stop = (finalPct = 100) => {
+      running = false;
+      clearInterval(timer);
+      value = finalPct;
+      bar.style.width = value + "%";
+      pct.textContent = value + "%";
+      setTimeout(() => { wrap.style.display = "none"; }, 500);
+    };
+
+    return { stop };
+  }
+
+  async function verifySessionWithPolling(session_id){
+    const maxTries = 10; // 약 20초
+    for(let i=0; i<maxTries; i++){
+      const res = await fetch("/api/verify-session", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({session_id})
+      });
+      const data = await res.json();
+
+      if(!data.paid){
+        return { ok:false, reason:"paid_false", data };
+      }
+      if(data.report_ready){
+        return { ok:true, data };
+      }
+      await sleep(2000);
+    }
+    return { ok:false, reason:"timeout", data:null };
+  }
+
+  // ---- main ----
+  (async function(){
+    const params = new URLSearchParams(window.location.search);
+    const session_id = params.get("session_id");
+
+    const statusEl = document.getElementById("status"); // hidden but used for JS safety
+    const reportEl = document.getElementById("report");
+    const actionsEl = document.getElementById("actions");
+    const noteEl = document.getElementById("note");
+
+    const patientBlock = document.getElementById("patientBlock");
+    const chartsEl = document.getElementById("charts");
+    const imgHeight = document.getElementById("imgHeight");
+    const imgWeight = document.getElementById("imgWeight");
+
+    if(!session_id){
+      statusEl.textContent = "session_id가 없습니다.";
+      return;
+    }
+
+    const prog = startFakeProgress();
+    let result;
+
+    try{
+      result = await verifySessionWithPolling(session_id);
+    }catch(e){
+      prog.stop(100);
+      statusEl.textContent = "서버 통신 오류";
+      return;
+    }
+
+    if(!result.ok){
+      prog.stop(100);
+      if(result.reason === "timeout"){
+        statusEl.textContent = "리포트 생성이 지연되고 있습니다. 잠시 후 새로고침 해주세요.";
+      }else{
+        statusEl.textContent = "결제가 확인되지 않았습니다.";
+      }
+      return;
+    }
+
+    // ✅ report
+    prog.stop(100);
+    const data = result.data;
+
+    reportEl.style.display = "block";
+    reportEl.textContent = data.report || "";
+
+    actionsEl.style.display = "flex";
+    noteEl.style.display = "block";
+
+    // ✅ patient + charts from localStorage
+    const latest = loadLatest();
+    if(latest){
+      patientBlock.style.display = "block";
+
+      document.getElementById("pName").textContent = latest.inputs?.name || "-";
+      document.getElementById("pDob").textContent  = latest.inputs?.dob || "-";
+      document.getElementById("pSex").textContent  = sexLabel(latest.sex);
+      document.getElementById("pAge").textContent  = formatAgeToYearsMonths(latest.inputs?.ageMonths);
+
+      const h = latest.inputs?.heightCm;
+      const w = latest.inputs?.weightKg;
+
+      const hp = latest.height?.percentile;
+      const wp = latest.weight?.percentile;
+
+      document.getElementById("pHeight").textContent =
+        (typeof h==="number") ? `${h.toFixed(1)} cm (${pctInt(hp)})` : "-";
+
+      document.getElementById("pWeight").textContent =
+        (typeof w==="number") ? `${w.toFixed(1)} kg (${pctInt(wp)})` : "-";
+
+      document.getElementById("pDate").textContent =
+        (latest.ts ? new Date(latest.ts).toLocaleDateString() : "-");
+
+      if(latest.images?.height || latest.images?.weight){
+        chartsEl.style.display = "grid";
+        if(latest.images?.height) imgHeight.src = latest.images.height;
+        if(latest.images?.weight) imgWeight.src = latest.images.weight;
+      }
+    }
+
+    // print/pdf
+    document.getElementById("btnPrint").addEventListener("click", () => window.print());
+    document.getElementById("btnPdf").addEventListener("click", () => window.print());
+  })();
+</script>
+
+</body>
+</html>

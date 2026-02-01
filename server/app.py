@@ -152,6 +152,7 @@ def get_stripe() -> None:
     if not sk:
         raise RuntimeError("STRIPE_SECRET_KEY is not set")
     stripe.api_key = sk
+    print("Stripe key prefix:", sk[:7])
 
 
 def get_price_id() -> str:

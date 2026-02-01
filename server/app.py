@@ -200,8 +200,6 @@ def create_checkout_session():
 
 
 # --- API: Verify + Get Report (success page calls this) ---
-from stripe.error import InvalidRequestError
-
 @app.post("/api/verify-session")
 def verify_session():
     get_stripe()

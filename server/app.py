@@ -316,6 +316,16 @@ def verify_session():
 
     return jsonify({"paid": True, "report_ready": True, "report": report}), 200
 
+# 관리자용 openai 호출
+@app.post("/api/generate_report")
+def generate_report():
+    payload = request.get_json(silent=True) or {}
+    try:
+        report = generate_ai_report(payload)
+        return jsonify({"report": report}), 200
+    except Exception as e:
+        return jsonify({"error": "ai_generation_failed", "detail": str(e)}), 500
+
 
 # --- Stripe webhook (optional, production recommended) ---
 @app.post("/webhook/stripe")

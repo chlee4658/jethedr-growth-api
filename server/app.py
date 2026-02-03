@@ -4,9 +4,9 @@ import os
 import json
 import time
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Optional, Tuple
 
-from flask import Flask, request, jsonify, send_from_directory, abort
+from flask import Flask, request, jsonify, send_from_directory
 from openai import OpenAI
 import stripe
 from dotenv import load_dotenv
@@ -68,11 +68,66 @@ SYSTEM_RULES = """
 """.strip()
 
 
-def _pct_int(x):
-    """percentile -> int percent string (e.g., 81) or None"""
-    if isinstance(x, (int, float)) and x == x:
-        return int(round(x))
+def _pct_int(x) -> Optional[int]:
+    """percentile -> int (e.g., 81) or None"""
+    try:
+        if isinstance(x, (int, float)) and x == x:
+            return int(round(float(x)))
+        if isinstance(x, str) and x.strip() != "":
+            v = float(x.strip().replace("%", ""))
+            if v == v:
+                return int(round(v))
+    except Exception:
+        pass
     return None
+
+
+def _extract_percentiles(payload: Dict[str, Any]) -> Tuple[Optional[int], Optional[int], Optional[int], Optional[int]]:
+    """
+    Returns: (height_kr, height_us, weight_kr, weight_us)
+
+    Supports both:
+    - flat keys: height_pct_kr, height_pct_us, weight_pct_kr, weight_pct_us
+    - nested keys: height:{kr_percentile/us_percentile}, weight:{kr_percentile/us_percentile}
+    Also falls back to legacy keys: height_pct, weight_pct (treated as KR if KR is missing).
+    """
+    # flat keys
+    h_kr = _pct_int(payload.get("height_pct_kr"))
+    h_us = _pct_int(payload.get("height_pct_us"))
+    w_kr = _pct_int(payload.get("weight_pct_kr"))
+    w_us = _pct_int(payload.get("weight_pct_us"))
+
+    # nested (app.js localStorage 구조)
+    h_obj = payload.get("height") if isinstance(payload.get("height"), dict) else {}
+    w_obj = payload.get("weight") if isinstance(payload.get("weight"), dict) else {}
+
+    if h_kr is None:
+        h_kr = _pct_int(h_obj.get("kr_percentile"))
+    if h_us is None:
+        h_us = _pct_int(h_obj.get("us_percentile"))
+
+    if w_kr is None:
+        w_kr = _pct_int(w_obj.get("kr_percentile"))
+    if w_us is None:
+        w_us = _pct_int(w_obj.get("us_percentile"))
+
+    # legacy fallback
+    if h_kr is None:
+        h_kr = _pct_int(payload.get("height_pct"))
+    if w_kr is None:
+        w_kr = _pct_int(payload.get("weight_pct"))
+
+    return h_kr, h_us, w_kr, w_us
+
+
+def _judge_by_pct(p: Optional[int]) -> str:
+    if p is None:
+        return "-"
+    if p < 3:
+        return "낮은 편(관찰)"
+    if p > 97:
+        return "높은 편(관찰)"
+    return "정상 범위"
 
 
 def generate_ai_report(payload: Dict[str, Any]) -> str:
@@ -89,10 +144,26 @@ def generate_ai_report(payload: Dict[str, Any]) -> str:
     height_cm = payload.get("height_cm", None)
     weight_kg = payload.get("weight_kg", None)
 
-    height_pct = _pct_int(payload.get("height_pct"))
-    weight_pct = _pct_int(payload.get("weight_pct"))
+    # ✅ KR/US percentiles (int)
+    height_pct_kr, height_pct_us, weight_pct_kr, weight_pct_us = _extract_percentiles(payload)
 
-    # ✅ 리포트 구조/내용 강제 (USER) + 영양 팁 강화 + 퍼센타일 정수 %
+    # ✅ 리포트 상단에 prepend할 “전문가 느낌” 1~2줄
+    # (OpenAI가 본문 안에서 자연스럽게 활용하도록, 프롬프트에 "0) 백분위수 요약"을 강제)
+    pct_summary_lines = []
+    pct_summary_lines.append(
+        f"백분위수 요약(참고): 신장 KR {str(height_pct_kr) + '%' if height_pct_kr is not None else '-'} / "
+        f"US {str(height_pct_us) + '%' if height_pct_us is not None else '-'}, "
+        f"체중 KR {str(weight_pct_kr) + '%' if weight_pct_kr is not None else '-'} / "
+        f"US {str(weight_pct_us) + '%' if weight_pct_us is not None else '-'}"
+    )
+    # 두 기준이 다를 때 짧은 한 줄 코멘트 유도(없으면 모델이 알아서 생략 가능)
+    if (height_pct_kr is not None and height_pct_us is not None and height_pct_kr != height_pct_us) or \
+       (weight_pct_kr is not None and weight_pct_us is not None and weight_pct_kr != weight_pct_us):
+        pct_summary_lines.append("※ KR/US 기준 값 차이는 기준집단/측정체계 차이로 달라질 수 있어 ‘추세(변화)’와 함께 해석하는 것이 중요합니다.")
+
+    pct_header = "\n".join(pct_summary_lines).strip()
+
+    # ✅ 리포트 구조/내용 강제 (USER)
     user_prompt = f"""
 아래 입력 정보를 바탕으로, 20년 이상 임상 경험을 가진 소아청소년과 전문의가
 보호자에게 설명하듯 ‘성장 해석 리포트’를 작성하세요.
@@ -105,8 +176,12 @@ def generate_ai_report(payload: Dict[str, Any]) -> str:
 - 나이가 소아 성장곡선 범위를 벗어나면(성인 등),
   “소아 성장곡선 퍼센타일 해석은 적용 불가”를 명확히 안내하세요.
 - 퍼센타일은 정수(예: 81%)로 표기하세요.
+- KR(한국)과 US(미국) 기준 백분위수가 모두 제공된 경우,
+  0) 항목에 반드시 “신장/체중: KR xx%, US yy%” 형태로 1~2줄 요약을 먼저 넣고,
+  본문에서도 필요 시 기준 차이를 간단히(불안 유발 없이) 설명하세요.
 
 출력 형식(한국어, 제목/불릿 사용):
+0) 백분위수 요약(전문의 메모 스타일, 1~2줄)
 1) 기본 정보 요약
 2) 현재 성장 상태의 임상적 해석
    - 신장/체중 퍼센타일이 의미하는 바(‘분포에서의 위치’)
@@ -126,13 +201,16 @@ def generate_ai_report(payload: Dict[str, Any]) -> str:
 9) 안내 및 유의사항(필수)
    - 본 리포트는 정보 제공이며 진단/치료를 대체하지 않음
 
+0) 항목에 반드시 아래 요약을 그대로 포함해 시작하세요:
+{pct_header}
+
 입력 정보:
 - 이름: {name}
 - 성별: {sex}
 - 생년월일: {dob}
 - 연령: {age_text} ({age_months if age_months is not None else "-"}개월)
-- 신장: {height_cm if height_cm is not None else "-"} cm (백분위: {str(height_pct) + "%" if height_pct is not None else "-"})
-- 체중: {weight_kg if weight_kg is not None else "-"} kg (백분위: {str(weight_pct) + "%" if weight_pct is not None else "-"})
+- 신장: {height_cm if height_cm is not None else "-"} cm (KR 백분위: {str(height_pct_kr) + "%" if height_pct_kr is not None else "-"} / US 백분위: {str(height_pct_us) + "%" if height_pct_us is not None else "-"})
+- 체중: {weight_kg if weight_kg is not None else "-"} kg (KR 백분위: {str(weight_pct_kr) + "%" if weight_pct_kr is not None else "-"} / US 백분위: {str(weight_pct_us) + "%" if weight_pct_us is not None else "-"})
 """.strip()
 
     resp = client.responses.create(
@@ -214,8 +292,7 @@ def verify_session():
     # Stripe 세션 조회 (잘못된 ID 방어)
     try:
         session = stripe.checkout.Session.retrieve(session_id)
-    except Exception as e:
-        # dummy, 잘못된 세션ID, 만료/삭제 등 -> 400으로 처리
+    except Exception:
         return jsonify({"paid": False, "error": "invalid_session_id"}), 400
 
     if getattr(session, "payment_status", None) != "paid":
@@ -238,6 +315,8 @@ def verify_session():
     _save_json(REPORTS_PATH, reports)
 
     return jsonify({"paid": True, "report_ready": True, "report": report}), 200
+
+
 # --- Stripe webhook (optional, production recommended) ---
 @app.post("/webhook/stripe")
 def stripe_webhook():
